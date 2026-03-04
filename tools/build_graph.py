@@ -52,6 +52,7 @@ def build_graph():
             "id": n["id"],
             "name": n["name"],
             "group": n["category"],
+            "class_restriction": n.get("class_restriction", "All"),
             "val": 1 # size
         })
         

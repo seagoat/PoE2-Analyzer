@@ -35,6 +35,11 @@
         </div>
 
         <div id="search-section" class="hidden">
+            <label class="block text-xs font-medium text-gray-400 mb-1">选择职业 (过滤天赋):</label>
+            <select id="class-select" class="w-full bg-gray-900 border border-gray-600 rounded-md py-2 px-3 text-sm text-white focus:outline-none focus:border-blue-500 mb-3">
+                <option value="All">所有职业 (全量搜索)</option>
+            </select>
+
             <label class="block text-xs font-medium text-gray-400 mb-1">选择一个起点 (Root Node):</label>
             <div class="relative">
                 <input type="text" id="node-search" placeholder="例如: Ice Nova, Call of the Brotherhood..." class="w-full bg-gray-900 border border-gray-600 rounded-md py-2 px-3 text-sm text-white focus:outline-none focus:border-blue-500">
@@ -88,6 +93,26 @@
                 document.getElementById('loading-indicator').classList.add('hidden');
                 document.getElementById('search-section').classList.remove('hidden');
 
+                // Populate Class Selector
+                const classes = new Set();
+                fullData.nodes.forEach(n => {
+                    if(n.class_restriction && n.class_restriction !== "All") {
+                        classes.add(n.class_restriction);
+                    }
+                });
+                const classSelect = document.getElementById('class-select');
+                Array.from(classes).sort().forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c;
+                    opt.textContent = c;
+                    classSelect.appendChild(opt);
+                });
+                
+                classSelect.addEventListener('change', () => {
+                    // When class changes, clear graph and clear search? Or just let user search again
+                    clearGraph();
+                });
+
                 setupSearch();
                 initGraph();
                 
@@ -105,9 +130,17 @@
 
             function doSearch() {
                 const term = searchInput.value.toLowerCase().trim();
+                const selectedClass = document.getElementById('class-select').value;
                 
                 // If empty, just show top 30 random/first nodes or generic ones
-                const results = fullData.nodes.filter(n => term === '' || n.name.toLowerCase().includes(term)).slice(0, 30);
+                const results = fullData.nodes.filter(n => {
+                    let passClass = true;
+                    if (selectedClass !== "All") {
+                        passClass = (n.class_restriction === "All" || n.class_restriction === selectedClass);
+                    }
+                    let passTerm = (term === '' || n.name.toLowerCase().includes(term));
+                    return passClass && passTerm;
+                }).slice(0, 30);
                 
                 list.innerHTML = '';
                 if (results.length === 0) {
