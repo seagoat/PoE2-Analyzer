@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PoE2 动态辐射脑图</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/d3"></script>
+    <script src="https://unpkg.com/force-graph"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0f172a; color: white; font-family: sans-serif; }
+        #graph-container { width: 100vw; height: 100vh; }
+        .ui-panel { position: absolute; top: 20px; left: 20px; z-index: 10; background: rgba(30, 41, 59, 0.9); padding: 20px; border-radius: 12px; border: 1px solid #334155; width: 350px; backdrop-filter: blur(4px); }
+        .dropdown-content { max-height: 250px; overflow-y: auto; }
+        
+        /* Loading spinner */
+        .loader { border: 4px solid #334155; border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="graph-container"></div>
+
+    <div class="ui-panel shadow-2xl">
+        <div class="flex justify-between items-center mb-4">
+            <h1 class="text-xl font-bold text-blue-400">PoE2 动态辐射脑图</h1>
+            <a href="index.html" class="text-xs text-gray-400 hover:text-white underline">返回主沙盒</a>
+        </div>
+        
+        <p class="text-xs text-gray-400 mb-4">由于全量连线高达 50 万条，全屏显示会导致浏览器崩溃。因此本页面采用<b>动态辐射模式</b>：请先搜索一个起点，图谱会自动展开第一层关系。<b>双击任何节点即可继续向外辐射扩展！</b></p>
+        
+        <div id="loading-indicator" class="text-center">
+            <div class="loader"></div>
+            <p class="text-sm text-blue-300">正在加载庞大的节点关系库 (约需几秒)...</p>
+        </div>
+
+        <div id="search-section" class="hidden">
+            <label class="block text-xs font-medium text-gray-400 mb-1">选择一个起点 (Root Node):</label>
+            <div class="relative">
+                <input type="text" id="node-search" placeholder="例如: Ice Nova, Call of the Brotherhood..." class="w-full bg-gray-900 border border-gray-600 rounded-md py-2 px-3 text-sm text-white focus:outline-none focus:border-blue-500">
+                <div id="candidate-dropdown" class="absolute w-full mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-2xl dropdown-content hidden z-50 custom-scrollbar">
+                    <ul id="candidate-list" class="py-1"></ul>
+                </div>
+            </div>
+            
+            <div class="mt-4 pt-4 border-t border-gray-700 flex justify-between items-center">
+                <span class="text-xs text-gray-400">当前图中节点数: <span id="node-count" class="text-white font-bold">0</span></span>
+                <button onclick="clearGraph()" class="text-xs bg-red-900 hover:bg-red-800 text-red-200 px-3 py-1.5 rounded transition-colors">清空画布</button>
+            </div>
+        </div>
+        
+        <!-- Legend -->
+        <div class="mt-4 flex flex-wrap gap-2 text-[10px]">
+            <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-[#3b82f6] mr-1"></span>技能 (Gem)</div>
+            <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-[#eab308] mr-1"></span>天赋 (Passive)</div>
+            <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-[#f97316] mr-1"></span>装备 (Unique)</div>
+        </div>
+    </div>
+
+    <script>
+        let fullData = { nodes: [], links: [] };
+        let nodesMap = new Map();
+        let linksBySource = new Map();
+        let linksByTarget = new Map();
+
+        let visibleNodes = new Set();
+        let visibleLinks = new Set();
+        
+        let Graph;
+
+        async function init() {
+            try {
+                // Fetch the large pre-calculated graph JSON
+                const res = await fetch('./poe2_graph.json');
+                fullData = await res.json();
+                
+                // Build maps for fast traversal
+                fullData.nodes.forEach(n => nodesMap.set(n.id, n));
+                
+                fullData.links.forEach(l => {
+                    if (!linksBySource.has(l.source)) linksBySource.set(l.source, []);
+                    linksBySource.get(l.source).push(l);
+                    
+                    if (!linksByTarget.has(l.target)) linksByTarget.set(l.target, []);
+                    linksByTarget.get(l.target).push(l);
+                });
+
+                document.getElementById('loading-indicator').classList.add('hidden');
+                document.getElementById('search-section').classList.remove('hidden');
+
+                setupSearch();
+                initGraph();
+                
+            } catch (err) {
+                console.error(err);
+                document.getElementById('loading-indicator').innerHTML = '<p class="text-red-400">数据加载失败，请确保本地服务器正常运行且已生成 poe2_graph.json。</p>';
+            }
+        }
+
+        function setupSearch() {
+            const searchInput = document.getElementById('node-search');
+            const dropdown = document.getElementById('candidate-dropdown');
+            const list = document.getElementById('candidate-list');
+            let searchTimeout;
+
+            function doSearch() {
+                const term = searchInput.value.toLowerCase().trim();
+                
+                // If empty, just show top 30 random/first nodes or generic ones
+                const results = fullData.nodes.filter(n => term === '' || n.name.toLowerCase().includes(term)).slice(0, 30);
+                
+                list.innerHTML = '';
+                if (results.length === 0) {
+                    list.innerHTML = '<li class="px-3 py-2 text-sm text-gray-500">无匹配结果</li>';
+                } else {
+                    results.forEach(n => {
+                        const li = document.createElement('li');
+                        li.className = 'px-3 py-2 hover:bg-gray-700 cursor-pointer flex flex-col border-b border-gray-700 last:border-0';
+                        let catColor = n.group === 'Gem' ? 'text-blue-400' : (n.group === 'Unique' ? 'text-orange-400' : 'text-yellow-400');
+                        
+                        // We need the original relations data to show input/outputs. 
+                        // The graph data doesn't have it directly. Let's calculate neighbors instead for the graph view!
+                        const inCount = linksByTarget.get(n.id)?.length || 0;
+                        const outCount = linksBySource.get(n.id)?.length || 0;
+                        
+                        let inputsSummary = inCount > 0 ? `<span class="bg-orange-900 text-orange-200 text-[10px] px-1.5 py-0.5 rounded border border-orange-700" title="可被多少节点触发">前置连线:${inCount}</span>` : '';
+                        let outputsSummary = outCount > 0 ? `<span class="bg-green-900 text-green-200 text-[10px] px-1.5 py-0.5 rounded border border-green-700" title="可触发多少节点">后续连线:${outCount}</span>` : '';
+
+                        li.innerHTML = `
+                            <div class="flex items-center">
+                                <span class="${catColor} text-xs font-bold w-12 truncate">[${n.group}]</span>
+                                <span class="text-sm text-white ml-2 font-bold truncate">${n.name}</span>
+                            </div>
+                            <div class="flex gap-2 mt-1 ml-14">
+                                ${inputsSummary}
+                                ${outputsSummary}
+                                ${(!inputsSummary && !outputsSummary) ? '<span class="text-gray-500 text-[10px] italic">无关联</span>' : ''}
+                            </div>
+                        `;
+                        li.onmousedown = () => {
+                            dropdown.classList.add('hidden');
+                            searchInput.value = n.name;
+                            setRootNode(n.id);
+                        };
+                        list.appendChild(li);
+                    });
+                }
+                dropdown.classList.remove('hidden');
+            }
+
+            searchInput.addEventListener('input', () => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(doSearch, 200);
+            });
+            
+            searchInput.addEventListener('focus', () => {
+                doSearch();
+            });
+            
+            document.addEventListener('click', (e) => {
+                if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.classList.add('hidden');
+                }
+            });
+        }
+
+        function initGraph() {
+            Graph = ForceGraph()(document.getElementById('graph-container'))
+                .backgroundColor('#0f172a')
+                .nodeId('id')
+                .nodeLabel('name')
+                .nodeColor(node => {
+                    if (node.group === 'Gem') return '#3b82f6';
+                    if (node.group === 'Unique') return '#f97316';
+                    return '#eab308'; // Passive
+                })
+                .nodeVal(node => Math.max(1, Math.log10(node.neighbors || 2) * 2)) // Size by neighbors
+                .linkSource('source')
+                .linkTarget('target')
+                .linkColor(link => 'rgba(75, 85, 99, 0.4)')
+                .linkWidth(1)
+                .linkDirectionalArrowLength(3.5)
+                .linkDirectionalArrowRelPos(1)
+                .onNodeClick(node => {
+                    // Left click to expand and center
+                    expandNode(node.id);
+                    Graph.centerAt(node.x, node.y, 1000);
+                    Graph.zoom(4, 2000); // Less aggressive zoom so you can see the new nodes
+                })
+                .onNodeHover(node => {
+                    document.body.style.cursor = node ? 'pointer' : null;
+                });
+                
+            Graph.onNodeDragEnd(node => {
+                node.fx = node.x;
+                node.fy = node.y;
+            });
+            
+            // Adjust the physics forces for stable radial spread
+            Graph.d3Force('charge').strength(-400); // Strong repulsion
+            Graph.d3Force('link').distance(150);    // Long links
+            
+            renderGraph();
+        }
+
+        function setRootNode(nodeId) {
+            visibleNodes.clear();
+            visibleLinks.clear();
+            
+            visibleNodes.add(nodeId);
+            expandNode(nodeId, true); // initial expand
+            
+            // Center camera
+            setTimeout(() => {
+                Graph.zoomToFit(400, 50);
+            }, 600);
+        }
+
+        function expandNode(nodeId, autoLimit = false) {
+            const node = nodesMap.get(nodeId);
+            if (!node) return;
+            
+            // Get all links where this node is source OR target
+            const outs = linksBySource.get(nodeId) || [];
+            const ins = linksByTarget.get(nodeId) || [];
+            
+            let allRelated = [...outs, ...ins];
+            
+            // If the node has thousands of connections (e.g. it's "Spell Damage"), cap it so it doesn't crash
+            if (autoLimit && allRelated.length > 200) {
+                allRelated = allRelated.slice(0, 200);
+                console.warn(`Node ${node.name} has too many connections. Limiting to 200 to prevent crash.`);
+            }
+
+            allRelated.forEach(l => {
+                visibleLinks.add(l);
+                visibleNodes.add(l.source);
+                visibleNodes.add(l.target);
+            });
+            
+            renderGraph();
+        }
+
+        window.clearGraph = function() {
+            visibleNodes.clear();
+            visibleLinks.clear();
+            document.getElementById('node-search').value = '';
+            renderGraph();
+        }
+
+        function renderGraph() {
+            const gData = {
+                nodes: Array.from(visibleNodes).map(id => {
+                    let n = nodesMap.get(id);
+                    // Add neighbors count for dynamic sizing
+                    n.neighbors = (linksBySource.get(id)?.length || 0) + (linksByTarget.get(id)?.length || 0);
+                    return n;
+                }),
+                links: Array.from(visibleLinks)
+            };
+            
+            document.getElementById('node-count').textContent = gData.nodes.length;
+            Graph.graphData(gData);
+        }
+
+        init();
+    </script>
+</body>
+</html>

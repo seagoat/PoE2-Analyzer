@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PoE2 节点连锁分析与构筑沙盒</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #1f2937; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .node-card { transition: all 0.2s; border-left: 4px solid transparent; }
+        .node-card:hover { transform: translateX(4px); border-left-color: #3b82f6; background-color: #374151; }
+        .dropdown-content { max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+    <!-- Top Navigation -->
+    <nav class="bg-gray-800 border-b border-gray-700 px-6 py-4 flex items-center justify-between z-30 relative mb-6">
+        <h1 class="text-xl font-bold text-blue-400">PoE2 工具箱</h1>
+        <div class="space-x-4">
+            <a href="index.html" class="bg-blue-900 text-white px-3 py-2 rounded-md text-sm font-medium">节点探索 & 构筑沙盒</a>
+            <a href="graph.html" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">全景动态脑图</a>
+        </div>
+    </nav>
+
+    <div class="w-full max-w-screen-2xl mx-auto flex-grow flex flex-col px-6 pb-6">
+        
+        <!-- Header & Controls -->
+        <header class="mb-6 bg-gray-800 p-5 rounded-xl shadow-lg border border-gray-700 z-20">
+            <div class="flex items-center justify-between mb-4">
+                <h1 class="text-2xl font-bold text-blue-400">PoE2 工具箱 <span class="text-sm font-normal text-gray-400">节点探索 & 数值沙盒一体化</span></h1>
+            </div>
+            
+            <div class="flex flex-col md:flex-row gap-4">
+                <!-- Class Selector -->
+                <div class="flex-shrink-0 w-full md:w-48">
+                    <label class="block text-xs font-medium text-gray-400 mb-1">1. 选择职业 (可选)</label>
+                    <select id="class-select" class="w-full bg-gray-700 border border-gray-600 rounded-md py-2 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="All">所有职业 (全量搜索)</option>
+                    </select>
+                </div>
+
+                <!-- Category Selector -->
+                <div class="flex-shrink-0 w-full md:w-32">
+                    <label class="block text-xs font-medium text-gray-400 mb-1">2. 节点类型</label>
+                    <select id="category-select" class="w-full bg-gray-700 border border-gray-600 rounded-md py-2 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="All">全部类型</option>
+                        <option value="Gem">技能石 (Gem)</option>
+                        <option value="Passive">天赋 (Passive)</option>
+                        <option value="Unique">暗金装备 (Unique)</option>
+                    </select>
+                </div>
+
+                <!-- Search & Dropdown -->
+                <div class="flex-grow relative">
+                    <label class="block text-xs font-medium text-gray-400 mb-1">3. 搜索并选择具体节点 (探索起点)</label>
+                    <div class="relative">
+                        <input type="text" id="node-search" placeholder="输入关键字 (如: Ice Nova, Call of the Brotherhood)..." autocomplete="off" class="w-full bg-gray-700 border border-gray-600 rounded-md py-2 px-3 pr-8 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <button id="clear-search-btn" class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white hidden" onclick="clearSearch()">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                    
+                    <div id="candidate-dropdown" class="absolute w-full mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-2xl dropdown-content hidden z-50">
+                        <ul id="candidate-list" class="py-1"></ul>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- TOP: 3-Column Node Explorer -->
+        <main id="main-view" class="grid grid-cols-1 lg:grid-cols-3 gap-6 relative mb-8 hidden">
+            
+            <!-- LEFT COLUMN: Inputs & Providers -->
+            <div class="bg-gray-800 rounded-xl p-5 shadow-lg border border-gray-700 flex flex-col h-[500px]">
+                <div class="border-b border-gray-700 pb-3 mb-4">
+                    <h2 class="text-xl font-bold text-orange-400 flex items-center">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path></svg>
+                        前置与增益来源
+                    </h2>
+                </div>
+                <div class="flex-grow flex flex-col min-h-0">
+                    <h3 class="text-sm font-semibold text-gray-300 mb-2 flex justify-between items-center">
+                        <span>能作用于此的节点</span>
+                        <span id="left-chain-count" class="text-xs bg-gray-700 px-2 py-0.5 rounded-full text-gray-400">0</span>
+                    </h3>
+                    <div id="left-chain-list" class="flex-grow overflow-y-auto custom-scrollbar pr-2 space-y-3"></div>
+                </div>
+            </div>
+
+            <!-- MIDDLE COLUMN: Current Node -->
+            <div class="bg-gray-800 rounded-xl p-5 shadow-2xl border-2 border-blue-500 flex flex-col h-[500px] relative transform scale-105 z-10">
+                <div class="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white text-xs font-bold px-4 py-1 rounded-full shadow-md">当前考察节点</div>
+                
+                <div class="text-center mt-4 mb-4">
+                    <span id="mid-category-badge" class="inline-block px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 mb-2">Category</span>
+                    <h2 id="mid-node-name" class="text-2xl font-bold text-white mb-2">Node Name</h2>
+                    <p id="mid-node-class" class="text-xs text-yellow-500 italic"></p>
+                </div>
+
+                <div class="bg-black bg-opacity-30 rounded-lg p-3 mb-4 border border-gray-700 flex-grow overflow-y-auto custom-scrollbar">
+                    <h3 class="text-xs font-semibold text-gray-400 border-b border-gray-700 pb-1 mb-2">属性 (Stats) / 需求 (Tags)</h3>
+                    <div id="mid-raw-stats" class="text-sm text-blue-200 font-mono leading-relaxed space-y-1"></div>
+                </div>
+                
+                <div id="mid-action-btn" class="mt-auto">
+                    <!-- Injected dynamically -->
+                </div>
+            </div>
+
+            <!-- RIGHT COLUMN: Outputs & Consumers -->
+            <div class="bg-gray-800 rounded-xl p-5 shadow-lg border border-gray-700 flex flex-col h-[500px]">
+                <div class="border-b border-gray-700 pb-3 mb-4">
+                    <h2 class="text-xl font-bold text-green-400 flex items-center justify-end">
+                        产生后续影响
+                        <svg class="w-5 h-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    </h2>
+                </div>
+                <div class="flex-grow flex flex-col min-h-0">
+                    <h3 class="text-sm font-semibold text-gray-300 mb-2 flex justify-between items-center">
+                        <span>能吃到此增益的节点</span>
+                        <span id="right-chain-count" class="text-xs bg-gray-700 px-2 py-0.5 rounded-full text-gray-400">0</span>
+                    </h3>
+                    <div id="right-chain-list" class="flex-grow overflow-y-auto custom-scrollbar pr-2 space-y-3"></div>
+                </div>
+            </div>
+        </main>
+
+        <!-- BOTTOM: Build Sandbox Calculator -->
+        <div id="sandbox-section" class="bg-gray-800 rounded-xl p-6 shadow-2xl border-2 border-purple-600 flex flex-col lg:flex-row gap-6">
+            
+            <!-- Inventory -->
+            <div class="w-full lg:w-1/3 flex flex-col gap-4 border-r border-gray-700 pr-0 lg:pr-6">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="text-xl font-bold text-white flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                        构筑沙盒 (Sandbox)
+                    </h2>
+                    <button onclick="clearBuild()" class="text-xs bg-red-900 hover:bg-red-800 text-red-200 px-2 py-1 rounded transition-colors">清空全部</button>
+                </div>
+                
+                <!-- Core Skill -->
+                <div class="bg-gray-900 rounded-lg p-4 border border-blue-800 relative">
+                    <h3 class="text-xs font-bold text-blue-400 mb-2 uppercase tracking-wider">Core Skill / 主技能</h3>
+                    <div id="sb-core-skill">
+                        <div class="text-sm text-gray-500 italic py-2">尚未设置。<br>请在上方探索器中选中一个技能石并点击"设为主技能"。</div>
+                    </div>
+                </div>
+
+                <!-- Mods & Equipment Slots -->
+                <div class="bg-gray-900 rounded-lg p-4 border border-yellow-800 flex-grow flex flex-col min-h-[300px]">
+                    <h3 class="text-xs font-bold text-yellow-400 mb-2 uppercase tracking-wider">Equipment & Passives</h3>
+                    
+                    <!-- Structured Slots -->
+                    <div id="sb-slots-container" class="space-y-2 mb-4 border-b border-gray-700 pb-4">
+                        <!-- Dynamic slots will be generated here -->
+                    </div>
+
+                    <h3 class="text-xs font-bold text-green-400 mb-2 uppercase tracking-wider">Passives & Others (<span id="sb-mod-count">0</span>)</h3>
+                    <div id="sb-mod-list" class="space-y-2 overflow-y-auto custom-scrollbar pr-2 flex-grow">
+                        <div class="text-sm text-gray-500 italic py-2">尚未添加天赋。<br>点击上方探索器卡片上的 [+] 图标加入沙盒。</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Calculator -->
+            <div class="w-full lg:w-2/3 flex flex-col">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <!-- Additive -->
+                    <div class="bg-gray-900 rounded-lg p-4 border border-blue-800">
+                        <h3 class="text-sm font-bold text-blue-400 mb-1">加法乘区 (Increased / Reduced)</h3>
+                        <div class="text-2xl font-mono text-white mb-2"><span id="calc-increased-sum">0</span>%</div>
+                        <div id="calc-increased-breakdown" class="text-xs text-gray-400 space-y-1 h-24 overflow-y-auto custom-scrollbar"></div>
+                    </div>
+                    <!-- Multiplicative -->
+                    <div class="bg-gray-900 rounded-lg p-4 border border-purple-800">
+                        <h3 class="text-sm font-bold text-purple-400 mb-1">指数乘区 (More / Less)</h3>
+                        <div class="text-2xl font-mono text-white mb-2">x<span id="calc-more-product">1.00</span></div>
+                        <div id="calc-more-breakdown" class="text-xs text-gray-400 space-y-1 h-24 overflow-y-auto custom-scrollbar"></div>
+                    </div>
+                </div>
+                
+                <!-- Result -->
+                <div class="mt-auto bg-black bg-opacity-50 rounded-xl p-5 border border-green-600 text-center relative overflow-hidden">
+                    <div class="absolute inset-0 bg-green-500 opacity-5"></div>
+                    <h3 class="text-lg text-gray-300 mb-1 relative z-10">最终技能伤害放大倍率 (Final Multiplier)</h3>
+                    <div class="text-4xl font-extrabold text-green-400 font-mono relative z-10" id="calc-final-multiplier">x1.00</div>
+                    <p class="text-xs text-gray-500 mt-2 relative z-10 font-mono" id="calc-formula">公式: (100% + 0%) * 1.00 = 1.00</p>
+                    <div class="mt-2 text-xs text-yellow-500 relative z-10 hidden" id="conversion-warning">
+                        ⚠️ 警告: 存在伤害转化词缀，简易计算器目前只基于原基础标签进行粗略匹配。
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Equipment Selection Modal -->
+    <div id="slot-selector-modal" class="fixed inset-0 bg-black bg-opacity-80 hidden z-[100] flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-gray-800 rounded-xl p-6 shadow-2xl border border-blue-500 w-full max-w-md flex flex-col max-h-[80vh]">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="slot-selector-title" class="text-lg font-bold text-white">选择装备</h3>
+                <button onclick="closeSlotSelector()" class="text-gray-400 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <input type="text" id="slot-selector-search" placeholder="搜索装备名称..." autocomplete="off" class="w-full bg-gray-900 border border-gray-600 rounded-md py-3 px-4 text-sm text-white focus:outline-none focus:border-blue-500 mb-4">
+            <ul id="slot-selector-list" class="flex-grow overflow-y-auto custom-scrollbar space-y-2 pr-2">
+                <!-- items -->
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        let poeData = { classes: [], nodes: [] };
+        let searchTimeout;
+
+        // Sandbox State
+        let buildCoreSkill = null;
+        let buildMods = [];
+
+        // Elements
+        const classSelect = document.getElementById('class-select');
+        const catSelect = document.getElementById('category-select');
+        const searchInput = document.getElementById('node-search');
+        const dropdown = document.getElementById('candidate-dropdown');
+        const candidateList = document.getElementById('candidate-list');
+        const mainView = document.getElementById('main-view');
+
+        async function init() {
+            try {
+                const res = await fetch('./poe2_relations.json');
+                poeData = await res.json();
+                
+                poeData.classes.forEach(cls => {
+                    const opt = document.createElement('option');
+                    opt.value = cls.name;
+                    opt.textContent = cls.name;
+                    classSelect.appendChild(opt);
+                });
+
+                setupEventListeners();
+                updateSandboxUI();
+            } catch (err) {
+                console.error(err);
+                alert("数据加载失败。");
+            }
+        }
+
+        function setupEventListeners() {
+            classSelect.addEventListener('change', updateFilters);
+            catSelect.addEventListener('change', updateFilters);
+            searchInput.addEventListener('input', () => {
+                const clearBtn = document.getElementById('clear-search-btn');
+                if (searchInput.value.length > 0) {
+                    clearBtn.classList.remove('hidden');
+                } else {
+                    clearBtn.classList.add('hidden');
+                }
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(updateFilters, 200);
+            });
+            searchInput.addEventListener('focus', () => {
+                const clearBtn = document.getElementById('clear-search-btn');
+                if (searchInput.value.length > 0) clearBtn.classList.remove('hidden');
+                updateFilters();
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!searchInput.contains(e.target) && !dropdown.contains(e.target) && e.target.id !== 'clear-search-btn' && !e.target.closest('#clear-search-btn')) {
+                    dropdown.classList.add('hidden');
+                }
+            });
+
+            // Modal Listeners
+            document.getElementById('slot-selector-search').addEventListener('input', (e) => {
+                renderSlotCandidates(e.target.value);
+            });
+            document.getElementById('slot-selector-modal').addEventListener('click', (e) => {
+                if (e.target.id === 'slot-selector-modal') closeSlotSelector();
+            });
+        }
+
+        window.clearSearch = function() {
+            searchInput.value = '';
+            document.getElementById('clear-search-btn').classList.add('hidden');
+            dropdown.classList.add('hidden');
+            mainView.classList.add('hidden');
+            searchInput.focus();
+            updateFilters();
+        }
+
+        function updateFilters() {
+            const cls = classSelect.value;
+            const cat = catSelect.value;
+            const term = searchInput.value.toLowerCase().trim();
+
+            let results = poeData.nodes.filter(n => {
+                let passClass = true;
+                if (cls !== "All") passClass = n.class_restriction === "All" || n.class_restriction === cls;
+                let passCat = (cat === "All") || (n.category === cat);
+                let passTerm = n.name.toLowerCase().includes(term);
+                return passClass && passCat && passTerm;
+            });
+
+            renderDropdown(results.slice(0, 50));
+        }
+
+        function renderDropdown(nodes) {
+            candidateList.innerHTML = '';
+            if (nodes.length === 0) {
+                candidateList.innerHTML = '<li class="px-4 py-3 text-sm text-gray-500 text-center">无匹配结果</li>';
+            } else {
+                nodes.forEach(node => {
+                    const li = document.createElement('li');
+                    li.className = 'px-4 py-2 hover:bg-gray-700 cursor-pointer flex flex-col border-b border-gray-700 last:border-0';
+                    let catColor = node.category === 'Gem' ? 'text-blue-400' : (node.category === 'Unique' ? 'text-orange-400' : 'text-yellow-400');
+                    let classBadge = node.class_restriction !== 'All' ? `<span class="text-[10px] bg-gray-600 text-gray-300 px-1.5 py-0.5 rounded ml-2">${node.class_restriction}</span>` : '';
+                    
+                    // Summarize Inputs
+                    let inputsSummary = '';
+                    if (node.inputs && node.inputs.length > 0) {
+                        const inCount = node.inputs.length;
+                        inputsSummary = `<span class="bg-orange-900 text-orange-200 text-[10px] px-1.5 py-0.5 rounded border border-orange-700" title="前置/触发条件">前置:${inCount}</span>`;
+                    }
+                    
+                    // Summarize Outputs
+                    let outputsSummary = '';
+                    if (node.outputs && node.outputs.length > 0) {
+                        const hasMore = node.outputs.some(o => o.type.includes('More'));
+                        const hasConv = node.outputs.some(o => o.type === 'Conversion');
+                        const outCount = node.outputs.length;
+                        
+                        let badgeClass = 'bg-green-900 text-green-200 border-green-700';
+                        if (hasMore) badgeClass = 'bg-purple-900 text-purple-200 border-purple-700 font-bold';
+                        if (hasConv && !hasMore) badgeClass = 'bg-pink-900 text-pink-200 border-pink-700 font-bold';
+                        
+                        let extraTxt = hasMore ? ' (含乘区!)' : (hasConv ? ' (含转化)' : '');
+                        outputsSummary = `<span class="${badgeClass} text-[10px] px-1.5 py-0.5 rounded border" title="提供的增益">后续:${outCount}${extraTxt}</span>`;
+                    }
+
+                    li.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <span class="${catColor} text-xs font-bold w-16">[${node.category}]</span>
+                                <span class="text-sm text-white ml-2 font-bold">${node.name}</span>
+                                ${classBadge}
+                            </div>
+                        </div>
+                        <div class="flex gap-2 mt-1 ml-18 pl-16">
+                            ${inputsSummary}
+                            ${outputsSummary}
+                            ${(!inputsSummary && !outputsSummary) ? '<span class="text-gray-500 text-[10px] italic">无明显连锁属性</span>' : ''}
+                        </div>
+                    `;
+                    li.onmousedown = () => selectNode(node);
+                    candidateList.appendChild(li);
+                });
+            }
+            dropdown.classList.remove('hidden');
+        }
+
+        function selectNode(node) {
+            dropdown.classList.add('hidden');
+            searchInput.value = node.name;
+            mainView.classList.remove('hidden');
+            
+            // Middle
+            document.getElementById('mid-node-name').textContent = node.name;
+            const badge = document.getElementById('mid-category-badge');
+            badge.textContent = node.category;
+            badge.className = `inline-block px-2 py-1 text-xs rounded mb-2 font-bold ${node.category === 'Gem' ? 'bg-blue-900 text-blue-200' : (node.category === 'Unique' ? 'bg-orange-900 text-orange-200' : 'bg-yellow-900 text-yellow-200')}`;
+            
+            let classStr = node.class_restriction !== "All" ? `专属职业: ${node.class_restriction}` : '全职业通用';
+            if (node.ascendancy) classStr += ` (${node.ascendancy})`;
+            document.getElementById('mid-node-class').textContent = classStr;
+
+            const statsContainer = document.getElementById('mid-raw-stats');
+            if (node.raw_stats && node.raw_stats.length > 0) {
+                statsContainer.innerHTML = node.raw_stats.map(s => `<div>• ${s}</div>`).join('');
+            } else if (node.category === 'Gem' && node.tags) {
+                statsContainer.innerHTML = `<div>标签: ${node.tags.join(', ')}</div>`;
+            } else {
+                statsContainer.innerHTML = '<span class="text-gray-500">无具体词缀描述</span>';
+            }
+
+            // Action Button
+            const btnContainer = document.getElementById('mid-action-btn');
+            if (node.category === 'Gem') {
+                btnContainer.innerHTML = `<button onclick="window.setCoreSkill('${node.id}')" class="w-full bg-blue-700 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded transition-colors shadow-lg border border-blue-500">设为主技能 (Set Core Skill)</button>`;
+            } else {
+                btnContainer.innerHTML = `<button onclick="window.addModToBuild('${node.id}')" class="w-full bg-yellow-700 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded transition-colors shadow-lg border border-yellow-500">添加至构筑沙盒 (Add to Sandbox)</button>`;
+            }
+
+            calculateLeftChains(node);
+            calculateRightChains(node);
+        }
+
+        function calculateLeftChains(targetNode) {
+            const container = document.getElementById('left-chain-list');
+            const countBadge = document.getElementById('left-chain-count');
+            container.innerHTML = '';
+            
+            let providers = [];
+            const myRequirements = targetNode.inputs.map(i => i.value.toLowerCase());
+
+            if (myRequirements.length > 0) {
+                poeData.nodes.forEach(source => {
+                    if (source.id === targetNode.id) return;
+                    let providesForMe = [];
+                    source.outputs.forEach(out => {
+                        if (out.target) {
+                            const outTarget = out.target.toLowerCase();
+                            myRequirements.forEach(req => {
+                                if (outTarget.includes(req)) providesForMe.push(out);
+                            });
+                        }
+                    });
+                    if (providesForMe.length > 0) providers.push({ node: source, impacts: providesForMe });
+                });
+            }
+
+            countBadge.textContent = providers.length;
+            if (providers.length === 0) {
+                container.innerHTML = '<div class="text-sm text-gray-500 text-center mt-4">没有找到前置或增益来源。</div>';
+                return;
+            }
+
+            providers.sort((a, b) => {
+                const scoreA = a.impacts.some(i => i.type.includes('More')) ? 3 : (a.impacts.some(i => i.type === 'Conversion') ? 2 : 1);
+                const scoreB = b.impacts.some(i => i.type.includes('More')) ? 3 : (b.impacts.some(i => i.type === 'Conversion') ? 2 : 1);
+                return scoreB - scoreA;
+            });
+
+            providers.slice(0, 30).forEach(p => {
+                container.innerHTML += buildChainCard(p.node, p.impacts, true);
+            });
+        }
+
+        function calculateRightChains(sourceNode) {
+            const container = document.getElementById('right-chain-list');
+            const countBadge = document.getElementById('right-chain-count');
+            container.innerHTML = '';
+
+            let consumers = [];
+            const myOutputs = sourceNode.outputs;
+
+            if (myOutputs.length > 0) {
+                poeData.nodes.forEach(target => {
+                    if (target.id === sourceNode.id) return;
+                    let consumedByThem = [];
+                    const targetReqs = target.inputs.map(i => i.value.toLowerCase());
+                    myOutputs.forEach(out => {
+                        if (out.target) {
+                            const outTarget = out.target.toLowerCase();
+                            targetReqs.forEach(req => {
+                                if (outTarget.includes(req)) consumedByThem.push(out);
+                            });
+                        }
+                    });
+                    if (consumedByThem.length > 0) consumers.push({ node: target, impacts: consumedByThem });
+                });
+            }
+
+            countBadge.textContent = consumers.length;
+            if (consumers.length === 0) {
+                container.innerHTML = '<div class="text-sm text-gray-500 text-center mt-4">没有找到后续影响节点。</div>';
+                return;
+            }
+
+            consumers.sort((a, b) => {
+                const scoreA = a.impacts.some(i => i.type.includes('More')) ? 3 : (a.impacts.some(i => i.type === 'Conversion') ? 2 : 1);
+                const scoreB = b.impacts.some(i => i.type.includes('More')) ? 3 : (b.impacts.some(i => i.type === 'Conversion') ? 2 : 1);
+                return scoreB - scoreA;
+            });
+
+            consumers.slice(0, 30).forEach(c => {
+                container.innerHTML += buildChainCard(c.node, c.impacts, false);
+            });
+        }
+
+        function buildChainCard(node, impacts, isLeft) {
+            let impactsHtml = impacts.map(i => {
+                let badgeColor = i.type.includes('More') ? 'text-purple-400 font-bold' : 'text-blue-300';
+                if(i.type === 'Conversion') badgeColor = 'text-pink-400';
+                let text = i.target || i.value;
+                if(i.type === 'Conversion') text = `${i.value}% -> ${i.to}`;
+                return `<div class="text-[10px] mt-0.5 text-gray-400 truncate w-full">- <span class="${badgeColor}">${i.type}</span>: ${text}</div>`;
+            }).join('');
+
+            const catColor = node.category === 'Gem' ? 'text-blue-400' : (node.category === 'Unique' ? 'text-orange-400' : 'text-yellow-400');
+            const arrowIcon = isLeft ? 
+                `<svg class="w-4 h-4 text-orange-500 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>` : 
+                `<svg class="w-4 h-4 text-green-500 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>`;
+
+            const actionBtn = node.category === 'Gem' 
+                ? `<button onclick="event.stopPropagation(); window.setCoreSkill('${node.id}')" class="bg-blue-900 hover:bg-blue-700 text-blue-100 px-2 py-1 rounded text-[10px] border border-blue-600 transition-colors" title="设为主技能">设为主技能</button>`
+                : `<button onclick="event.stopPropagation(); window.addModToBuild('${node.id}')" class="bg-yellow-900 hover:bg-yellow-700 text-yellow-100 px-2 py-1 rounded text-[10px] border border-yellow-600 transition-colors" title="加到沙盒">[+] 加到沙盒</button>`;
+
+            return `
+                <div class="node-card bg-gray-900 rounded p-2 flex border border-gray-700 cursor-pointer items-start" onclick="clickThrough('${node.name}')">
+                    <div class="flex-grow min-w-0 pr-2">
+                        <div class="flex items-center text-sm mb-1">
+                            <span class="${catColor} text-[10px] font-bold mr-1">[${node.category}]</span>
+                            <span class="text-gray-200 font-bold hover:text-white truncate" title="${node.name}">${node.name}</span>
+                        </div>
+                        ${impactsHtml}
+                    </div>
+                    <div class="flex-shrink-0 flex flex-col items-center justify-center border-l border-gray-700 pl-2">
+                        ${arrowIcon}
+                        ${actionBtn}
+                    </div>
+                </div>
+            `;
+        }
+
+        window.clickThrough = function(nodeName) {
+            const node = poeData.nodes.find(n => n.name === nodeName);
+            if (node) {
+                selectNode(node);
+                document.getElementById('main-view').scrollIntoView({ behavior: 'smooth' });
+            }
+        };
+
+        // ====== Sandbox Logic ====== //
+
+        let currentSelectingSlot = null;
+
+        window.openSlotSelector = function(slotId) {
+            currentSelectingSlot = EQUIPMENT_SLOTS.find(s => s.id === slotId);
+            if(!currentSelectingSlot) return;
+            
+            document.getElementById('slot-selector-title').textContent = `选择装备 - ${currentSelectingSlot.label.split(' ')[0]}`;
+            const searchInput = document.getElementById('slot-selector-search');
+            searchInput.value = '';
+            document.getElementById('slot-selector-modal').classList.remove('hidden');
+            searchInput.focus();
+            
+            renderSlotCandidates('');
+        }
+
+        window.closeSlotSelector = function() {
+            document.getElementById('slot-selector-modal').classList.add('hidden');
+            currentSelectingSlot = null;
+        }
+
+        function renderSlotCandidates(term) {
+            const list = document.getElementById('slot-selector-list');
+            term = term.toLowerCase();
+            
+            let candidates = poeData.nodes.filter(n => {
+                if (n.category !== 'Unique') return false;
+                if (!currentSelectingSlot.types.includes(n.item_slot)) return false;
+                if (term && !n.name.toLowerCase().includes(term)) return false;
+                return true;
+            });
+            
+            list.innerHTML = '';
+            
+            const noneLi = document.createElement('li');
+            noneLi.className = 'px-3 py-2 bg-gray-900 hover:bg-red-900 rounded cursor-pointer text-sm text-gray-400 border border-gray-700 flex justify-between items-center transition-colors mb-2';
+            noneLi.innerHTML = `<span>清空该槽位 (Empty Slot)</span><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>`;
+            noneLi.onclick = () => {
+                currentSelectingSlot.item = null;
+                closeSlotSelector();
+                updateSandboxUI();
+            };
+            list.appendChild(noneLi);
+
+            if(candidates.length === 0) {
+                const emptyLi = document.createElement('li');
+                emptyLi.className = 'text-gray-500 text-sm py-4 text-center';
+                emptyLi.textContent = '没有找到匹配的装备';
+                list.appendChild(emptyLi);
+            } else {
+                candidates.slice(0, 50).forEach(n => {
+                    const li = document.createElement('li');
+                    li.className = 'px-3 py-2 bg-gray-700 hover:bg-blue-800 rounded cursor-pointer text-sm border border-gray-600 transition-colors flex flex-col gap-1';
+                    
+                    // Summarize Inputs (Requires/Triggers)
+                    let inputsSummary = '';
+                    if (n.inputs && n.inputs.length > 0) {
+                        const inCount = n.inputs.length;
+                        inputsSummary = `<span class="bg-orange-900 text-orange-200 text-[10px] px-1.5 py-0.5 rounded border border-orange-700" title="前置/触发条件">前置:${inCount}</span>`;
+                    }
+                    
+                    // Summarize Outputs (Provides/Converts)
+                    let outputsSummary = '';
+                    if (n.outputs && n.outputs.length > 0) {
+                        const hasMore = n.outputs.some(o => o.type.includes('More'));
+                        const hasConv = n.outputs.some(o => o.type === 'Conversion');
+                        const outCount = n.outputs.length;
+                        
+                        let badgeClass = 'bg-green-900 text-green-200 border-green-700';
+                        if (hasMore) badgeClass = 'bg-purple-900 text-purple-200 border-purple-700 font-bold';
+                        if (hasConv && !hasMore) badgeClass = 'bg-pink-900 text-pink-200 border-pink-700 font-bold';
+                        
+                        let extraTxt = hasMore ? ' (含乘区!)' : (hasConv ? ' (含转化)' : '');
+                        outputsSummary = `<span class="${badgeClass} text-[10px] px-1.5 py-0.5 rounded border" title="提供的增益">后续:${outCount}${extraTxt}</span>`;
+                    }
+
+                    li.innerHTML = `
+                        <div class="font-bold text-orange-300">${n.name}</div>
+                        <div class="flex gap-2 mt-0.5">
+                            ${inputsSummary}
+                            ${outputsSummary}
+                            ${(!inputsSummary && !outputsSummary) ? '<span class="text-gray-500 text-[10px] italic">无明显连锁属性</span>' : ''}
+                        </div>
+                    `;
+
+                    li.onclick = () => {
+                        currentSelectingSlot.item = n;
+                        closeSlotSelector();
+                        updateSandboxUI();
+                    };
+                    list.appendChild(li);
+                });
+            }
+        }
+
+        window.setCoreSkill = function(id) {
+            const node = poeData.nodes.find(n => n.id === id);
+            if(node) {
+                buildCoreSkill = node;
+                updateSandboxUI();
+            }
+        }
+
+        const EQUIPMENT_SLOTS = [
+            { id: 'Helmet', label: '头部 (Helmet)', item: null, types: ['Helmet'] },
+            { id: 'BodyArmour', label: '胸甲 (Body Armour)', item: null, types: ['Body Armour'] },
+            { id: 'Gloves', label: '手套 (Gloves)', item: null, types: ['Gloves'] },
+            { id: 'Boots', label: '鞋子 (Boots)', item: null, types: ['Boots'] },
+            { id: 'Amulet', label: '项链 (Amulet)', item: null, types: ['Amulet', 'Talisman'] },
+            { id: 'Ring1', label: '戒指 1 (Ring)', item: null, types: ['Ring'] },
+            { id: 'Ring2', label: '戒指 2 (Ring)', item: null, types: ['Ring'] },
+            { id: 'Belt', label: '腰带 (Belt)', item: null, types: ['Belt'] },
+            { id: 'Weapon1', label: '主手 (Weapon 1)', item: null, types: ['Axe', 'Bow', 'Claw', 'Crossbow', 'Dagger', 'Flail', 'Mace', 'Sceptre', 'Spear', 'Staff', 'Sword', 'Wand'] },
+            { id: 'Weapon2', label: '副手 (Weapon 2/Shield)', item: null, types: ['Axe', 'Bow', 'Claw', 'Crossbow', 'Dagger', 'Flail', 'Mace', 'Sceptre', 'Spear', 'Staff', 'Sword', 'Wand', 'Shield', 'Quiver', 'Focus'] }
+        ];
+
+        window.addModToBuild = function(id) {
+            const node = poeData.nodes.find(n => n.id === id);
+            if(!node) return;
+
+            if (node.category === 'Unique') {
+                // Determine slot
+                let placed = false;
+                for (let i = 0; i < EQUIPMENT_SLOTS.length; i++) {
+                    let slot = EQUIPMENT_SLOTS[i];
+                    if (slot.types.includes(node.item_slot)) {
+                        // If it's empty, or it's not a ring/weapon (just overwrite), or we are trying to fill rings intelligently
+                        if (!slot.item) {
+                            slot.item = node;
+                            placed = true;
+                            break;
+                        }
+                    }
+                }
+                
+                // If all matching slots are full, overwrite the first matching slot
+                if (!placed) {
+                    for (let i = 0; i < EQUIPMENT_SLOTS.length; i++) {
+                        let slot = EQUIPMENT_SLOTS[i];
+                        if (slot.types.includes(node.item_slot)) {
+                            slot.item = node; // Overwrite
+                            placed = true;
+                            break;
+                        }
+                    }
+                }
+            } else {
+                // Passive or other
+                if(!buildMods.find(m => m.id === id)) {
+                    buildMods.push(node);
+                }
+            }
+            updateSandboxUI();
+        }
+
+        window.removeEquipFromBuild = function(slotId) {
+            let slot = EQUIPMENT_SLOTS.find(s => s.id === slotId);
+            if (slot) slot.item = null;
+            updateSandboxUI();
+        }
+
+        window.removeModFromBuild = function(id) {
+            buildMods = buildMods.filter(m => m.id !== id);
+            updateSandboxUI();
+        }
+
+        window.clearBuild = function() {
+            buildCoreSkill = null;
+            buildMods = [];
+            EQUIPMENT_SLOTS.forEach(s => s.item = null);
+            updateSandboxUI();
+        }
+
+        function updateSandboxUI() {
+            // Update Core Skill Disp
+            const coreContainer = document.getElementById('sb-core-skill');
+            if(buildCoreSkill) {
+                let tagsHtml = buildCoreSkill.inputs.filter(i => i.type === 'TagRequirement')
+                                .map(i => `<span class="bg-blue-800 text-blue-100 px-1.5 py-0.5 rounded text-[10px] border border-blue-600 mr-1 mt-1 inline-block">${i.value}</span>`).join('');
+                coreContainer.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <div class="text-sm font-bold text-white">${buildCoreSkill.name}</div>
+                        <button onclick="buildCoreSkill=null; updateSandboxUI();" class="text-gray-500 hover:text-red-400">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                    <div class="mt-1">${tagsHtml}</div>
+                `;
+            } else {
+                coreContainer.innerHTML = '<div class="text-sm text-gray-500 italic py-2">尚未设置。<br>请在上方探索器中选中一个技能石并点击"设为主技能"。</div>';
+            }
+
+            // Update Equipment Slots
+            const slotsContainer = document.getElementById('sb-slots-container');
+            slotsContainer.innerHTML = EQUIPMENT_SLOTS.map(slot => {
+                if (slot.item) {
+                    return `
+                        <div class="bg-black bg-opacity-40 border border-orange-800 rounded p-2 flex justify-between items-center group shadow-inner cursor-pointer hover:border-orange-600 transition-colors" onclick="openSlotSelector('${slot.id}')">
+                            <div class="flex-grow truncate pr-2">
+                                <span class="text-gray-500 text-[10px] uppercase w-12 inline-block">${slot.label.split(' ')[0]}</span>
+                                <span class="text-orange-400 text-xs font-bold">${slot.item.name}</span>
+                            </div>
+                            <button onclick="event.stopPropagation(); removeEquipFromBuild('${slot.id}')" class="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" title="卸下">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    return `
+                        <div class="bg-gray-800 bg-opacity-50 border border-gray-700 border-dashed rounded p-1.5 flex items-center justify-center text-gray-500 hover:text-gray-300 hover:border-gray-400 text-xs cursor-pointer transition-colors" onclick="openSlotSelector('${slot.id}')">
+                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                            选择 ${slot.label}
+                        </div>
+                    `;
+                }
+            }).join('');
+
+            // Update Passives Disp
+            const modList = document.getElementById('sb-mod-list');
+            document.getElementById('sb-mod-count').textContent = buildMods.length;
+            if(buildMods.length === 0) {
+                modList.innerHTML = '<div class="text-sm text-gray-600 italic py-2 text-center">尚未添加天赋节点</div>';
+            } else {
+                modList.innerHTML = buildMods.map(m => {
+                    let catColor = 'text-yellow-400';
+                    return `
+                        <div class="bg-black bg-opacity-30 border border-gray-700 rounded p-1.5 flex justify-between items-center group">
+                            <div class="truncate pr-2">
+                                <span class="${catColor} text-[10px] mr-1">[${m.category}]</span>
+                                <span class="text-xs text-gray-300">${m.name}</span>
+                            </div>
+                            <button onclick="removeModFromBuild('${m.id}')" class="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            recalculateBuild();
+        }
+
+        function recalculateBuild() {
+            let increasedSum = 0;
+            let moreProduct = 1.0;
+            
+            const incBreakdown = document.getElementById('calc-increased-breakdown');
+            const moreBreakdown = document.getElementById('calc-more-breakdown');
+            const warnEl = document.getElementById('conversion-warning');
+            
+            incBreakdown.innerHTML = '';
+            moreBreakdown.innerHTML = '';
+            warnEl.classList.add('hidden');
+
+            if (!buildCoreSkill) {
+                document.getElementById('calc-increased-sum').textContent = '0';
+                document.getElementById('calc-more-product').textContent = '1.00';
+                document.getElementById('calc-final-multiplier').textContent = 'x1.00';
+                document.getElementById('calc-formula').textContent = '请先设为主技能以开启计算';
+                return;
+            }
+
+            const skillTags = buildCoreSkill.inputs.filter(i => i.type === 'TagRequirement').map(i => i.value.toLowerCase());
+            
+            // Combine passives and equipped items
+            let activeNodes = [...buildMods];
+            EQUIPMENT_SLOTS.forEach(s => { if(s.item) activeNodes.push(s.item); });
+
+            activeNodes.forEach(mod => {
+                mod.outputs.forEach(out => {
+                    if (out.type === 'Conversion') warnEl.classList.remove('hidden');
+                    if (!out.target) return;
+                    
+                    const target = out.target.toLowerCase();
+                    let isMatch = false;
+                    
+                    if (target === "damage" || target === "spell damage" && skillTags.includes("spell") || target === "attack damage" && skillTags.includes("attack")) {
+                         isMatch = true;
+                    } else {
+                        skillTags.forEach(tag => {
+                            if (target.includes(tag)) isMatch = true;
+                        });
+                    }
+
+                    if (isMatch) {
+                        if (out.type === 'Increased') {
+                            increasedSum += out.value;
+                            incBreakdown.innerHTML += `<div class="flex justify-between border-b border-gray-800 py-1 text-[11px]"><span>${mod.name}</span><span class="text-blue-300">+${out.value}%</span></div>`;
+                        } else if (out.type === 'Reduced') {
+                            increasedSum -= out.value;
+                            incBreakdown.innerHTML += `<div class="flex justify-between border-b border-gray-800 py-1 text-[11px]"><span>${mod.name}</span><span class="text-red-400">-${out.value}%</span></div>`;
+                        } else if (out.type === 'More (Multiplier)') {
+                            let multiplier = 1 + (out.value / 100.0);
+                            moreProduct *= multiplier;
+                            moreBreakdown.innerHTML += `<div class="flex justify-between border-b border-gray-800 py-1 text-[11px]"><span>${mod.name}</span><span class="text-purple-300">x${multiplier.toFixed(2)}</span></div>`;
+                        } else if (out.type === 'Less (Multiplier)') {
+                            let multiplier = 1 - (out.value / 100.0);
+                            moreProduct *= multiplier;
+                            moreBreakdown.innerHTML += `<div class="flex justify-between border-b border-gray-800 py-1 text-[11px]"><span>${mod.name}</span><span class="text-red-400">x${multiplier.toFixed(2)}</span></div>`;
+                        }
+                    }
+                });
+            });
+
+            if(incBreakdown.innerHTML === '') incBreakdown.innerHTML = '<div class="text-gray-600 mt-2 text-xs">暂无匹配加法词缀</div>';
+            if(moreBreakdown.innerHTML === '') moreBreakdown.innerHTML = '<div class="text-gray-600 mt-2 text-xs">暂无匹配乘法词缀</div>';
+
+            document.getElementById('calc-increased-sum').textContent = increasedSum;
+            document.getElementById('calc-more-product').textContent = moreProduct.toFixed(2);
+            
+            let finalMultiplier = (1 + (increasedSum / 100.0)) * moreProduct;
+            
+            document.getElementById('calc-final-multiplier').textContent = `x${finalMultiplier.toFixed(2)}`;
+            document.getElementById('calc-formula').textContent = `公式: (100% ${increasedSum >= 0 ? '+' : ''} ${increasedSum}%) * ${moreProduct.toFixed(2)} = ${finalMultiplier.toFixed(2)}`;
+        }
+
+        init();
+    </script>
+</body>
+</html>
