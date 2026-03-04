@@ -13,7 +13,7 @@
 2. **装备纸娃娃沙盒 (Build Sandbox)**
    - 提供各部位的装备槽位 (头部、胸甲、戒指、武器等)。
    - 从探索器中一键将装备或天赋加入沙盒。
-   - **实时伤害倍率计算器**：自动分离 \Increased\ (加法区) 和 \More\ (指数乘区)，并计算最终伤害放大倍率。
+   - **实时伤害倍率计算器**：自动分离 `Increased` (加法区) 和 `More` (指数乘区)，并计算最终伤害放大倍率。
 
 3. **全景动态辐射脑图 (Dynamic Force Graph)**
    - 将游戏中 5000+ 个节点与 50万+ 条隐性关联连线在 3D 物理引擎中渲染。
@@ -32,25 +32,25 @@
 
 本工具为纯前端实现，结合 Python 数据提取脚本。你可以直接运行：
 
-\\\ash
+```bash
 # Windows 用户
 .\start_web.ps1
 
 # Linux / Mac 用户
 ./start_web.sh
-\\\
+```
 
 然后在浏览器中打开: [http://localhost:8000](http://localhost:8000)
 
 ## 🛠️ 数据更新说明
 
 本工具的数据基于 PathOfBuilding (PoB) 社区版。如果你需要拉取最新的游戏数据：
-1. 确保上级目录中存在 \PathOfBuilding-PoE2\ 源码。
+1. 确保上级目录中存在 `PathOfBuilding-PoE2` 源码。
 2. 运行提取脚本：
-   \\\ash
+   ```bash
    cd tools
    python export_relations.py
-   \\\
+   ```
 
 ## 📝 技术栈
 - 前端: 原生 HTML/JS, TailwindCSS, Force-Graph (D3.js)
